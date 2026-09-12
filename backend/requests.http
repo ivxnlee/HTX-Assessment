@@ -1,0 +1,38 @@
+### Use this file with VS Code REST Client extension by Huachao Mao to test the backend API
+@base = http://localhost:3001
+
+### Get all developers
+GET {{base}}/api/developers
+
+### Get all skills
+GET {{base}}/api/skills
+
+### Get all tasks
+GET {{base}}/api/tasks
+
+### Create a task needing both skills
+POST {{base}}/api/tasks
+Content-Type: application/json
+
+{
+  "title": "As a logged-in user, I want to update my profile picture.",
+  "skillIds": [1, 2]
+}
+
+### Assign Alice (Frontend only) — should fail with 400
+PATCH {{base}}/api/tasks/1/assignee
+Content-Type: application/json
+
+{ "developerId": 1 }
+
+### Assign Carol (both skills) — should succeed
+PATCH {{base}}/api/tasks/1/assignee
+Content-Type: application/json
+
+{ "developerId": 3 }
+
+### Mark done
+PATCH {{base}}/api/tasks/1/status
+Content-Type: application/json
+
+{ "status": "Done" }
