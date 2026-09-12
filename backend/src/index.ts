@@ -7,12 +7,10 @@ import {
   createTaskBody,
   assigneeBody,
   statusBody,
-} from "./schemas.js";
-import type {
-  IdParam,
-  CreateTaskBody,
-  AssigneeBody,
-  StatusBody,
+  type IdParam,
+  type CreateTaskBody,
+  type AssigneeBody,
+  type StatusBody,
 } from "./schemas.js";
 import type { ErrorRequestHandler } from "express";
 
