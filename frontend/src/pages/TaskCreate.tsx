@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { createTask, getSkills, type Skill } from "../api";
+import TaskEditor from "../components/TaskEditor";
+import { emptyDraft, hasBlankTitle, toNewTask, type TaskDraft } from "../taskDraft";
 
 function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : "Something went wrong";
@@ -10,8 +12,9 @@ export default function TaskCreate() {
   const navigate = useNavigate();
 
   const [skills, setSkills] = useState<Skill[]>([]);
-  const [title, setTitle] = useState("");
-  const [skillIds, setSkillIds] = useState<number[]>([]);
+  // The whole tree — the task and every nested subtask — lives in this one value.
+  const [draft, setDraft] = useState<TaskDraft>(emptyDraft);
+  const [showErrors, setShowErrors] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,18 +34,14 @@ export default function TaskCreate() {
     };
   }, []);
 
-  const toggleSkill = (id: number) =>
-    setSkillIds((current) =>
-      current.includes(id) ? current.filter((s) => s !== id) : [...current, id],
-    );
-
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
 
-    // The backend trims and rejects an empty title; catch it here too so the
-    // user gets the message without a round trip.
-    if (!title.trim()) {
-      setError("Title is required");
+    // The backend rejects blank titles at any depth; catch them here too so the
+    // offending fields can be highlighted without a round trip.
+    if (hasBlankTitle(draft)) {
+      setShowErrors(true);
+      setError("Every task and subtask needs a title");
       return;
     }
 
@@ -50,7 +49,7 @@ export default function TaskCreate() {
     setError(null);
 
     try {
-      await createTask(title.trim(), skillIds);
+      await createTask(toNewTask(draft));
       navigate("/");
     } catch (err) {
       setError(errorMessage(err));
@@ -69,37 +68,19 @@ export default function TaskCreate() {
 
       {error && <p className="error">{error}</p>}
 
-      <form className="form" onSubmit={handleSubmit}>
-        <label className="field">
-          <span className="label">Title</span>
-          <input
-            type="text"
-            value={title}
-            autoFocus
-            placeholder="e.g. Build the login page"
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </label>
+      <form className="form" onSubmit={handleSubmit} noValidate>
+        <TaskEditor
+          draft={draft}
+          skills={skills}
+          depth={0}
+          showErrors={showErrors}
+          onChange={setDraft}
+        />
 
-        <fieldset className="field">
-          <legend className="label">Required skills</legend>
-          {skills.length === 0 ? (
-            <p className="muted">No skills available.</p>
-          ) : (
-            <div className="checkboxes">
-              {skills.map((skill) => (
-                <label className="checkbox" key={skill.id}>
-                  <input
-                    type="checkbox"
-                    checked={skillIds.includes(skill.id)}
-                    onChange={() => toggleSkill(skill.id)}
-                  />
-                  {skill.name}
-                </label>
-              ))}
-            </div>
-          )}
-        </fieldset>
+        <p className="hint">
+          Only developers who hold every selected skill can be assigned to a task. A task can
+          only be marked Done once all of its subtasks are Done.
+        </p>
 
         <div className="actions">
           <button className="button" type="submit" disabled={saving}>

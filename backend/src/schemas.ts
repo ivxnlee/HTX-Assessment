@@ -6,10 +6,13 @@ export const idParam = z.object({
   id: z.coerce.number().int().positive(),
 });
 
-export const createTaskBody = z.object({
-  title: z.string().trim().min(1, "Title is required"),
-  skillIds: z.array(z.number().int().positive()).default([]),
-});
+export const createTaskBody: z.ZodType<CreateTaskBody> = z.lazy(() =>
+  z.object({
+    title: z.string().trim().min(1, "Title is required"),
+    skillIds: z.array(z.number().int().positive()).default([]),
+    subtasks: z.array(createTaskBody).default([]),
+  }),
+);
 
 export const assigneeBody = z.object({
   // null means "unassign"
@@ -23,6 +26,21 @@ export const statusBody = z.object({
 // One definition, both jobs: the types come from the schemas, so validation
 // and types cannot drift apart.
 export type IdParam = z.infer<typeof idParam>;
-export type CreateTaskBody = z.infer<typeof createTaskBody>;
+export type CreateTaskBody = {
+  title: string;
+  skillIds: number[];
+  subtasks: CreateTaskBody[];
+};
 export type AssigneeBody = z.infer<typeof assigneeBody>;
 export type StatusBody = z.infer<typeof statusBody>;
+type Skill = { id: number; name: string };
+export type TaskRow = {
+  id: number;
+  parent_id: number | null;
+  title: string;
+  status: string;
+  assignee_id: number | null;
+  assignee_name: string | null;
+  skills: Skill[];
+};
+export type TaskNode = TaskRow & { subtasks: TaskNode[] };

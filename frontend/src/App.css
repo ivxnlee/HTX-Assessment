@@ -46,6 +46,24 @@
   background: var(--bg);
 }
 
+.button.small {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+}
+
+.link-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--danger);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
 /* --------------------------------------------------------------- table --- */
 
 .tasks {
@@ -79,6 +97,31 @@
   border-bottom: none;
 }
 
+/* A select sizes itself to its longest option, which would make rows with a
+   blocked "Done (finish subtasks first)" option wider than the rest. */
+.tasks select {
+  width: 9.5rem;
+}
+
+.title-cell {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.subtask-marker {
+  color: var(--muted);
+}
+
+.subtask-row td {
+  background: #fcfcfd;
+}
+
+.subtask-count {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
 .chips {
   display: inline-flex;
   flex-wrap: wrap;
@@ -97,7 +140,7 @@
 /* ---------------------------------------------------------------- form --- */
 
 .form {
-  max-width: 460px;
+  max-width: 680px;
   padding: 1.25rem;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -121,6 +164,57 @@
 
 .field input[type="text"] {
   width: 100%;
+}
+
+.field input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.field-error {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--danger);
+}
+
+/* ------------------------------------------------------ subtask editor --- */
+
+.subtasks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.subtask {
+  padding: 0.85rem 1rem 1rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.subtask .field {
+  margin-bottom: 0.85rem;
+}
+
+.subtask-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+}
+
+.subtask-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+.form > .hint {
+  margin: 1.25rem 0 1rem;
 }
 
 .checkboxes {

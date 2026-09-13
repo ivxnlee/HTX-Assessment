@@ -17,12 +17,32 @@ import {
  * choice the server would reject.
  */
 function isQualified(developer: Developer, task: Task) {
-  const developerSkillIds = new Set(developer.skills.map((skill) => skill.id));
+  const held = new Set(developer.skills.map((skill) => skill.id));
+  return task.skills.every((skill) => held.has(skill.id));
+}
 
-  // Returns true if every skill required by the task is in the developer's skill set
-  // or skill array is empty (no skills required).
-  return task.skills.every((requiredSkill) =>
-    developerSkillIds.has(requiredSkill.id),
+/**
+ * A task can be Done only once all its subtasks are. Checking direct children
+ * is enough: each of them was held to the same rule before it could be Done.
+ */
+function canBeDone(task: Task) {
+  return task.subtasks.every((subtask) => subtask.status === "Done");
+}
+
+/** Lists the tree depth-first, so each subtask's row sits under its parent's. */
+function flatten(tasks: Task[], depth = 0): { task: Task; depth: number }[] {
+  return tasks.flatMap((task) => [
+    { task, depth },
+    ...flatten(task.subtasks, depth + 1),
+  ]);
+}
+
+/** Returns the tree with one task, found at any depth, patched. */
+function patchTree(tasks: Task[], id: number, changes: Partial<Task>): Task[] {
+  return tasks.map((task) =>
+    task.id === id
+      ? { ...task, ...changes }
+      : { ...task, subtasks: patchTree(task.subtasks, id, changes) },
   );
 }
 
@@ -39,7 +59,7 @@ export default function TaskList() {
   const [saving, setSaving] = useState<number[]>([]);
 
   useEffect(() => {
-    let cancelled = false; // To avoid setting state on an unmounted component.
+    let cancelled = false;
 
     Promise.all([getTasks(), getDevelopers()])
       .then(([loadedTasks, loadedDevelopers]) => {
@@ -60,61 +80,53 @@ export default function TaskList() {
   }, []);
 
   const patchTask = (id: number, changes: Partial<Task>) =>
-    setTasks((current) =>
-      current.map((task) => (task.id === id ? { ...task, ...changes } : task)),
-    );
+    setTasks((current) => patchTree(current, id, changes));
 
   /**
    * Applies the change locally first so the dropdown reacts immediately, then
    * confirms it with the server and rolls back if the request fails.
+   * Resolves to whether the server accepted it.
    */
   async function save(
     task: Task,
     changes: Partial<Task>,
     send: () => Promise<unknown>,
-  ) {
-    // Save the previous values for any fields being changed. If the backend rejects
-    // the update, we restore these values so the UI matches the last known good state.
+  ): Promise<boolean> {
     const rollback: Partial<Task> = {};
-
-    if (changes.status !== undefined) {
-      rollback.status = task.status;
+    // Copy the original values of the changed fields so they can be restored if the request fails.
+    for (const key of Object.keys(changes) as (keyof Task)[]) {
+      (rollback[key] as Task[keyof Task]) = task[key];
     }
 
-    if (changes.assignee_id !== undefined) {
-      rollback.assignee_id = task.assignee_id;
-    }
-
-    if (changes.assignee_name !== undefined) {
-      rollback.assignee_name = task.assignee_name;
-    }
-
-    // Update the local task immediately so the dropdown reflects the user's
-    // change before the network request finishes.
     patchTask(task.id, changes);
-
-    // Mark this row as busy so the dropdown is disabled while the save is in flight.
     setSaving((ids) => [...ids, task.id]);
     setError(null);
 
     try {
-      // Send the actual update to the backend. If this succeeds, we keep the
-      // optimistic UI change as the real state.
       await send();
+      return true;
     } catch (err) {
-      // If the server rejects the change, revert the row back to its previous values
-      // and show the error message returned by the backend.
       patchTask(task.id, rollback);
       setError(errorMessage(err));
+      return false;
     } finally {
-      // Always clear the busy flag when the request settles, whether it succeeded
-      // or failed.
       setSaving((ids) => ids.filter((id) => id !== task.id));
     }
   }
 
-  const changeStatus = (task: Task, status: Status) =>
-    save(task, { status }, () => updateTaskStatus(task.id, status));
+  async function changeStatus(task: Task, status: Status) {
+    const saved = await save(task, { status }, () =>
+      updateTaskStatus(task.id, status),
+    );
+
+    // Moving a subtask off Done makes the server reopen any Done ancestors, so
+    // re-read the tree rather than re-implement that cascade here.
+    if (saved && task.parent_id !== null) {
+      getTasks()
+        .then(setTasks)
+        .catch((err) => setError(errorMessage(err)));
+    }
+  }
 
   const changeAssignee = (task: Task, developerId: number | null) => {
     const developer = developers.find((d) => d.id === developerId) ?? null;
@@ -154,13 +166,38 @@ export default function TaskList() {
             </tr>
           </thead>
           <tbody>
-            {tasks.map((task) => {
+            {flatten(tasks).map(({ task, depth }) => {
               const busy = saving.includes(task.id);
               const qualified = developers.filter((d) => isQualified(d, task));
+              const doneCount = task.subtasks.filter(
+                (s) => s.status === "Done",
+              ).length;
 
               return (
-                <tr key={task.id}>
-                  <td>{task.title}</td>
+                <tr
+                  key={task.id}
+                  className={depth > 0 ? "subtask-row" : undefined}
+                >
+                  <td>
+                    <div
+                      className="title-cell"
+                      style={{ paddingLeft: `${depth * 1.25}rem` }}
+                    >
+                      {depth > 0 && (
+                        <span className="subtask-marker" aria-hidden="true">
+                          ↳
+                        </span>
+                      )}
+                      <span>
+                        {task.title}
+                        {task.subtasks.length > 0 && (
+                          <span className="subtask-count">
+                            {doneCount}/{task.subtasks.length} subtasks done
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  </td>
 
                   <td>
                     {task.skills.length === 0 ? (
@@ -185,11 +222,18 @@ export default function TaskList() {
                         changeStatus(task, e.target.value as Status)
                       }
                     >
-                      {STATUSES.map((status) => (
-                        <option key={status} value={status}>
-                          {status}
-                        </option>
-                      ))}
+                      {STATUSES.map((status) => {
+                        const blocked = status === "Done" && !canBeDone(task);
+                        return (
+                          <option
+                            key={status}
+                            value={status}
+                            disabled={blocked}
+                          >
+                            {blocked ? "Done (finish subtasks first)" : status}
+                          </option>
+                        );
+                      })}
                     </select>
                   </td>
 

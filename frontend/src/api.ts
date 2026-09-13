@@ -16,13 +16,23 @@ export type Developer = {
   skills: Skill[];
 };
 
+/** GET /api/tasks returns top-level tasks, each nesting its subtasks. */
 export type Task = {
   id: number;
+  parent_id: number | null;
   title: string;
   status: Status;
   assignee_id: number | null;
   assignee_name: string | null;
   skills: Skill[];
+  subtasks: Task[];
+};
+
+/** POST /api/tasks body: a task and, recursively, the subtasks to create with it. */
+export type NewTask = {
+  title: string;
+  skillIds: number[];
+  subtasks: NewTask[];
 };
 
 /* --------------------------------------------------------------- errors --- */
@@ -84,10 +94,11 @@ export const getDevelopers = () => request<Developer[]>("/api/developers");
 
 export const getSkills = () => request<Skill[]>("/api/skills");
 
-export const createTask = (title: string, skillIds: number[]) =>
+/** Creates the whole tree in one transaction; resolves to the top-level task's id. */
+export const createTask = (task: NewTask) =>
   request<{ id: number }>("/api/tasks", {
     method: "POST",
-    body: JSON.stringify({ title, skillIds }),
+    body: JSON.stringify(task),
   });
 
 export const updateTaskStatus = (taskId: number, status: Status) =>

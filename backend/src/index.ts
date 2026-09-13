@@ -11,60 +11,94 @@ import {
   type CreateTaskBody,
   type AssigneeBody,
   type StatusBody,
+  type TaskRow,
+  type TaskNode,
 } from "./schemas.js";
 import type { ErrorRequestHandler } from "express";
+import type { PoolClient } from "pg";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Build a tree of tasks from a flat list of rows.
+function buildTree(rows: TaskRow[]): TaskNode[] {
+  const byId = new Map(
+    rows.map((r) => [r.id, { ...r, subtasks: [] as TaskNode[] }]),
+  );
+  const roots: TaskNode[] = [];
+
+  for (const node of byId.values()) {
+    if (node.parent_id === null) {
+      roots.push(node);
+    } else {
+      byId.get(node.parent_id)?.subtasks.push(node);
+    }
+  }
+
+  return roots;
+}
+
 // Read Tasks
 app.get("/api/tasks", async (_req, res) => {
-  const result = await pool.query(`
-    SELECT t.id, t.title, t.status, t.assignee_id,
-           d.name AS assignee_name,
-           COALESCE(
-             json_agg(json_build_object('id', s.id, 'name', s.name))
-               FILTER (WHERE s.id IS NOT NULL),
-             '[]'
-           ) AS skills
+  const result = await pool.query<TaskRow>(`
+    SELECT t.id, t.parent_id, t.title, t.status, t.assignee_id,
+    d.name AS assignee_name,
+    COALESCE(
+      json_agg(json_build_object('id', s.id, 'name', s.name))
+        FILTER (WHERE s.id IS NOT NULL),
+      '[]'
+    ) AS skills
     FROM tasks t
     LEFT JOIN developers d ON d.id = t.assignee_id
     LEFT JOIN task_skills ts ON ts.task_id = t.id
     LEFT JOIN skills s ON s.id = ts.skill_id
     GROUP BY t.id, d.name
-    ORDER BY t.created_at
+    ORDER BY t.created_at, t.id
   `);
-  res.json(result.rows);
+  res.json(buildTree(result.rows));
 });
+
+// Insert a task and its subtasks recursively, along with their associated skills.
+async function insertTask(
+  client: PoolClient,
+  input: CreateTaskBody,
+  parentId: number | null,
+): Promise<number> {
+  const { rows } = await client.query(
+    "INSERT INTO tasks (title, parent_id) VALUES ($1, $2) RETURNING id",
+    [input.title, parentId],
+  );
+  const taskId = rows[0].id;
+
+  for (const skillId of input.skillIds) {
+    await client.query(
+      "INSERT INTO task_skills (task_id, skill_id) VALUES ($1, $2)",
+      [taskId, skillId],
+    );
+  }
+
+  for (const child of input.subtasks) {
+    await insertTask(client, child, taskId);
+  }
+
+  return taskId;
+}
 
 // Create Task
 app.post("/api/tasks", validate({ body: createTaskBody }), async (req, res) => {
-  const { title, skillIds } = req.body as CreateTaskBody;
+  const input = req.body as CreateTaskBody;
 
   const client = await pool.connect(); // Get a client from the pool for transaction
   try {
     await client.query("BEGIN"); // Start transaction
-
-    const { rows } = await client.query(
-      "INSERT INTO tasks (title) VALUES ($1) RETURNING id",
-      [title],
-    );
-    const taskId = rows[0].id;
-
-    for (const skillId of skillIds) {
-      await client.query(
-        "INSERT INTO task_skills (task_id, skill_id) VALUES ($1, $2)",
-        [taskId, skillId],
-      );
-    }
-
+    const taskId = await insertTask(client, input, null);
     await client.query("COMMIT"); // Commit transaction
+
     res.status(201).json({ id: taskId });
   } catch (err) {
-    console.error(err);
     await client.query("ROLLBACK"); // Rollback transaction on error
-    res.status(500).json({ error: "Failed to create task" });
+    throw err; // Let the error handling middleware handle the response
   } finally {
     client.release(); // Release the client back to the pool
   }
@@ -140,15 +174,59 @@ app.patch(
     const { id: taskId } = res.locals.params as IdParam;
     const { status } = req.body as StatusBody;
 
-    const result = await pool.query(
-      "UPDATE tasks SET status = $1 WHERE id = $2",
-      [status, taskId],
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
 
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: "Task not found" });
+      if (status === "Done") {
+        // Lock the subtasks so none can change status until this transaction ends.
+        const { rows: subtasks } = await client.query<{ status: string }>(
+          "SELECT status FROM tasks WHERE parent_id = $1 FOR UPDATE",
+          [taskId],
+        );
+
+        if (subtasks.some((s) => s.status !== "Done")) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({
+            error: "All subtasks must be Done before this task can be Done",
+          });
+        }
+      }
+
+      const result = await client.query(
+        "UPDATE tasks SET status = $1 WHERE id = $2",
+        [status, taskId],
+      );
+
+      if (result.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Task not found" });
+      }
+
+      // Moving away from Done invalidates any completed ancestor
+      if (status !== "Done") {
+        await client.query(
+          `WITH RECURSIVE ancestors AS (
+             SELECT parent_id FROM tasks WHERE id = $1
+             UNION
+             SELECT t.parent_id FROM tasks t
+             JOIN ancestors a ON t.id = a.parent_id
+           )
+           UPDATE tasks SET status = 'In-progress'
+           WHERE id IN (SELECT parent_id FROM ancestors WHERE parent_id IS NOT NULL)
+             AND status = 'Done'`,
+          [taskId],
+        );
+      }
+
+      await client.query("COMMIT");
+      res.json({ success: true });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
     }
-    res.json({ success: true });
   },
 );
 
