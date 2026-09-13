@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import { pool } from "./db.js";
 import { validate } from "./validate.js";
+import { classifyTitles } from "./llm.js";
 import {
   idParam,
   createTaskBody,
@@ -20,6 +21,13 @@ import type { PoolClient } from "pg";
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Depth-first walk collecting nodes with no user-specified skills
+function collectUnclassified(node: CreateTaskBody, acc: CreateTaskBody[] = []) {
+  if (!node.skillIds || node.skillIds.length === 0) acc.push(node);
+  for (const child of node.subtasks ?? []) collectUnclassified(child, acc);
+  return acc;
+}
 
 // Build a tree of tasks from a flat list of rows.
 function buildTree(rows: TaskRow[]): TaskNode[] {
@@ -88,6 +96,34 @@ async function insertTask(
 // Create Task
 app.post("/api/tasks", validate({ body: createTaskBody }), async (req, res) => {
   const input = req.body as CreateTaskBody;
+
+  const pending = collectUnclassified(input);
+
+  // If there are any tasks without user-specified skills, classify them using the LLM.
+  if (pending.length > 0) {
+    try {
+      const { rows } = await pool.query<{ id: number; name: string }>(
+        "SELECT id, name FROM skills",
+      );
+      const skillIdByName = new Map(rows.map((r) => [r.name, r.id]));
+
+      const classified = await classifyTitles(pending.map((n) => n.title));
+
+      for (const [index, names] of classified) {
+        const node = pending[index];
+        if (!node) continue;
+
+        node.skillIds = names
+          .map((n) => skillIdByName.get(n))
+          .filter((id): id is number => id !== undefined);
+      }
+    } catch (err) {
+      console.error(
+        "Skill classification failed, creating without skills:",
+        err,
+      );
+    }
+  }
 
   const client = await pool.connect(); // Get a client from the pool for transaction
   try {
@@ -257,6 +293,11 @@ app.get("/api/skills", async (_req, res) => {
 // Error handling middleware
 const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   console.error(err);
+
+  // Malformed JSON body from express.json()
+  if (err instanceof SyntaxError && "body" in err) {
+    return res.status(400).json({ error: "Malformed JSON in request body" });
+  }
 
   if (err.code === "23503") {
     return res.status(400).json({ error: "Referenced record does not exist" });

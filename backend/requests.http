@@ -10,13 +10,24 @@ GET {{base}}/api/skills
 ### Get all tasks
 GET {{base}}/api/tasks
 
-### Create a task needing both skills
+### Create a task that should be classified as Frontend
 POST {{base}}/api/tasks
 Content-Type: application/json
 
 {
-  "title": "As a logged-in user, I want to update my profile picture.",
-  "skillIds": [1, 2]
+  "title": "As a visitor, I want to see a responsive homepage so that I can easily navigate on both desktop and mobile devices."
+}
+
+### Create a task - Parent with unclassified subtasks
+POST {{base}}/api/tasks
+Content-Type: application/json
+
+{
+  "title": "As a logged-in user, I want to update my profile information and upload a profile picture so that my account details are accurate and personalized.",
+  "subtasks": [
+    { "title": "As a visitor, I want to see a responsive homepage so that I can easily navigate on both desktop and mobile devices." },
+    { "title": "As a system administrator, I want audit logs of all data access and modifications so that I can ensure compliance with data protection regulations and investigate any security incidents." }
+  ]
 }
 
 ### Assign Alice (Frontend only) — should fail with 400
