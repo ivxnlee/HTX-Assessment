@@ -1,4 +1,4 @@
-# Task Assignment Application
+# HTX Assessment Application
 
 Full-stack task management with nested subtasks, skill-based developer assignment, and automatic skill classification via LLM.
 
@@ -9,8 +9,8 @@ Built for the HTX xDigital AI Products Team take-home test.
 Requires Docker Desktop and a Google Gemini API key ([aistudio.google.com/apikey](https://aistudio.google.com/apikey)).
 
 ```bash
-git clone <repository-url>
-cd task-assignment
+git clone https://github.com/ivxnlee/HTX-Assessment
+cd HTX-Assessment
 
 cp .env.example .env
 # set GEMINI_API_KEY in .env
