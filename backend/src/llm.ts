@@ -16,6 +16,8 @@ export async function classifyTitles(
 
 For each task, return "Frontend" if it involves user interface, layout, styling, or client-side behaviour; "Backend" if it involves servers, databases, APIs, authentication, or data processing; both if it requires both.
 
+If a task title is not a recognisable software development task, return an empty array for it. Do not guess.
+
 Tasks:
 ${titles.map((t, i) => `${i}: ${t}`).join("\n")}`;
 

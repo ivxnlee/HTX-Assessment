@@ -11,6 +11,36 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d taskdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: task-api
+    environment:
+      DATABASE_URL: postgres://app:app@db:5432/taskdb
+      PORT: 3001
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash-lite}
+    ports:
+      - "3001:3001"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: http://localhost:3001
+    container_name: task-web
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
 
 volumes:
   pgdata:
